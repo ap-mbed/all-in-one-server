@@ -6,3 +6,6 @@
 !/PyOCD/CFE_Injector/*.xlsx
 !/PyOCD/DFE_Injector/*.xlsx
 *.disasm
+/Unity/*.o
+/Unity/*.elf
+/Unity/*.bin
