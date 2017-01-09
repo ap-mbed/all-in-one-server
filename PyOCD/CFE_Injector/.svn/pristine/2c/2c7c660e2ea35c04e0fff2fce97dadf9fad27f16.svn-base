@@ -1,0 +1,51 @@
+__author__ = 'Jens Vankeirsbilck'
+
+import logging
+
+class BasicBlock:
+    def __init__(self, startAddress, endAddress, falseJump, trueJump, listOfInstructions):
+        self.startAddress = startAddress
+        self.endAddress = endAddress
+        self.falseJumpAddress = falseJump
+        self.trueJumpAddress = trueJump
+        self.listOfInstructions = listOfInstructions
+
+    def addressInBlock(self, givenAddress):
+        logging.debug("Determining if the given address is in this Basic Block")
+        if((givenAddress >= self.startAddress) and (givenAddress <=self.endAddress)):
+            logging.debug("Given address is part of the Basic Block")
+            return True
+        else:
+            logging.debug("Given address is not part of the Basic Block")
+            return False
+
+    def isEndAddress(self, givenAddress):
+        if(givenAddress == self.endAddress):
+            return True
+        else:
+            return False
+
+    def isFalseJumpAddress(self, givenAddress):
+        if(givenAddress == self.falseJumpAddress):
+            return True
+        else:
+            return False
+
+    def isTrueJumpAddress(self, givenAddress):
+        if(givenAddress == self.trueJumpAddress):
+            return True
+        else:
+            return False
+
+    def isValidAddressForBasicBlock(self, givenAddress):
+        found = False
+        for i in range(0, len(self.listOfInstructions)):
+            if self.listOfInstructions[i] == givenAddress:
+                found = True
+        return found
+
+    def getStartAddress(self):
+        return self.startAddress
+
+    def getEndAddress(self):
+        return self.endAddress

@@ -1,0 +1,32 @@
+__author__ = 'Jens Vankeirsbilck'
+
+
+import logging
+from faultInjection.PC_injector import PCinjector
+from faultInjection.cfeInjector import CFEInjector
+
+logging.basicConfig(level=25)
+
+def testReadPC():
+    inj = PCinjector()
+    PC = inj.readPC()
+    logging.info("PC is: 0x%X" %PC)
+
+def injectInterJump():
+    inj = CFEInjector()
+    inj.injectInterBlockWithErrorCheck()
+
+def suite(nameSheet, numberOfCFEs):
+    inj = CFEInjector()
+    inj.injectionSuiteInterBlock(numberOfCFEs,nameSheet)
+
+def debug():
+    inj = CFEInjector()
+    inj.pcInjector.target.halt()
+    r11 = inj.pcInjector.target.readCoreRegister('r11')
+    r12 = inj.pcInjector.target.readCoreRegister('r12')
+    print "r11 = {:d}; r12 = {:d}\n".format(r11,r12)
+
+def batches(numberOfBatches, numberOfCFEs):
+    inj = CFEInjector()
+    inj.injectionBatchesInterBlock(numberOfBatches,numberOfCFEs)

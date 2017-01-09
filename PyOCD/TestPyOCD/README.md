@@ -1,0 +1,1 @@
+This folder contains source files for one option of testing mbed with pyOCD. This way was rejected and we used testing script from ing. Jens Vankeirsbilck.

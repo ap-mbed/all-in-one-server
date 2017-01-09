@@ -1,0 +1,273 @@
+__author__ = 'Jens Vankeirsbilck'
+
+import logging
+from CFG.basicBlock import BasicBlock
+from PC_injector import PCinjector
+from time import sleep
+import math
+import random
+from openpyxl import load_workbook
+import os
+
+class CFEInjector:
+    def __init__(self,board=None):
+        self.pcInjector = PCinjector(board)
+        self.cfg = self._createCFG()
+        self.workbook = load_workbook('{}/{}'.format(os.path.dirname(os.path.dirname(__file__)),
+                                                     'resultsCFEInjectionYACCA.xlsx'))
+
+    def injectInterBlockJumpOneBitFlip(self):
+        try:
+            origPC = self.pcInjector.readPC()
+            logging.debug("Read PC: 0x%X" % origPC)
+            origBB = self._determineBasicBlockID(origPC)
+            possNewPC = self._possibleNewPCList(origPC,True,False)
+            bitFlippedPC = possNewPC[random.randint(0, len(possNewPC)-1)]
+            logging.log(25, "PC to inject: 0x%X" % bitFlippedPC)
+            if not self.cfg[origBB].isEndAddress(origPC):
+                self.pcInjector.writeNewPC(bitFlippedPC)
+                logging.info("Injected Inter Block jump from 0x{:X} to 0x{:X}".format(origPC,bitFlippedPC))
+            elif (not self.cfg[origBB].isTrueJumpAddress(bitFlippedPC)) and \
+                    (not self.cfg[origBB].isFalseJumpAddress(bitFlippedPC)):
+                self.pcInjector.writeNewPC(bitFlippedPC)
+                logging.info("Injected Inter Block jump from 0x{:X} to 0x{:X}".format(origPC,bitFlippedPC))
+            else:
+                logging.info("Could not inject inter block jump due to the bitFlipped PC having the value of "
+                             "TrueJumpAddress or FalseJumpAddress")
+        except Exception as e:
+            logging.error("Failed to inject an inter block jump!\n%s" % e)
+            raise Exception("Failed to inject Inter Block Jump")
+
+    def checkError(self, errorHandlingAddress):
+        try:
+            pc = self.pcInjector.readPC()
+            if(pc == errorHandlingAddress):
+                return True
+            else:
+                return False
+        except Exception as e:
+            logging.error("Failed to check for errorHandling:\n%s" % e)
+            raise Exception("Failed to check for error")
+
+    def injectInterBlockWithErrorCheck(self):
+        try:
+            self.injectInterBlockJumpOneBitFlip()
+            sleep(2)
+            if(self.checkError(0x276)):
+                logging.log(25, "Injected Inter Block Jump was detected")
+            else:
+                logging.log(25, "Injected Inter Block Jump was undetected")
+        except Exception as e:
+            logging.error("Inter Block jump injection failed!\n%s" % e)
+        finally:
+            self.pcInjector.reset()
+
+    def injectionSuiteInterBlock(self, numberOfCFEs, nameSheet):
+        # get Excel worksheet
+        ws = self._initExcelSheet(nameSheet, "Inter Block only", numberOfCFEs)
+        for i in range(0, numberOfCFEs):
+            sleep(random.random()*3)
+            detected = 0
+            hardFault = 0
+            undWR = 0
+            undCR = 0
+            faultInjected = False
+            while not faultInjected:
+                try:
+                    origPC = self.pcInjector.readPC()
+                    logging.info("Read PC: 0x%X" % origPC)
+                    possNewPC = self._possibleNewPCList(origPC,True,False)
+                    bitFlippedPC = possNewPC[random.randint(0, len(possNewPC)-1)]
+                    logging.info("PC to inject: 0x%X" % bitFlippedPC)
+                    self.pcInjector.writeNewPC(bitFlippedPC)
+                    sleep(.5)
+                    if(self.checkError(0x1d6)):
+                        detected = 1
+                        logging.debug("InterBlock detected")
+                    elif(self.checkError(0x29e)):
+                        hardFault = 1
+                        logging.debug("Hardfault detetected")
+                    elif(self.checkError(0x306)):
+                        logging.debug("InterBlock undetected, wrong result")
+                        undWR = 1
+                    else:
+                        undCR =1
+                        logging.debug("InterBlock undetected, correct result")
+                    faultInjected = True
+                    ws = self._writeToExcel(ws, nameSheet,i+3,origPC,bitFlippedPC,detected,hardFault,undWR, undCR)
+                except Exception as e:
+                    logging.error("Error while injecting CFE\n%s"%e)
+                finally:
+                    self.pcInjector.reset()
+        logging.log(25,"*****************************\nFINISHED")
+
+
+    def injectionBatchesInterBlock(self, numberOfBatches, numberOfCFEs):
+        for i in range(0,numberOfBatches):
+            logging.log(25, "Starting batch %i\n" % i)
+            nameSheet = input("Give in the name of the Excel worksheet to save the data: \n")
+            self.injectionSuiteInterBlock(numberOfCFEs, nameSheet)
+        logging.log(25, "##############################################\nFINISHED all BATCHES\n##############################################")
+
+
+
+    def _createCFG(self):
+        cfg = []
+        bb0 = BasicBlock([])
+        bb1 = BasicBlock([])
+        bb2 = BasicBlock([])
+        bb3 = BasicBlock([])
+        bb4 = BasicBlock([])
+        bb5 = BasicBlock([])
+        bb6 = BasicBlock([])
+        bb7 = BasicBlock([])
+        bb8 = BasicBlock([])
+        bb9 = BasicBlock([])
+        bb10 = BasicBlock([])
+
+        cfg.append(bb0)
+        cfg.append(bb1)
+        cfg.append(bb2)
+        cfg.append(bb3)
+        cfg.append(bb4)
+        cfg.append(bb5)
+        cfg.append(bb6)
+        cfg.append(bb7)
+        cfg.append(bb8)
+        cfg.append(bb9)
+        cfg.append(bb10)
+        return cfg
+
+    def _determineBasicBlockID(self, pc):
+        logging.debug("Determining Basic Block for PC value 0x%X" % pc)
+        for i in range(0,len(self.cfg)):
+            bb = self.cfg[i]
+            if bb.addressInBlock(pc):
+                return i
+        raise Exception("Program Counter value not in CFG")
+
+    def _createAllPossibleOneBitFlipResults(self, givenPC):
+        logging.debug("Creating all possible one bit-flip results for given PC: 0x%X" % givenPC)
+        results = []
+        digits = self._determineNumberOfDigits(givenPC)
+        rangeLimit = (digits*4)
+        for i in range(0, rangeLimit):
+            mask = 1 << i
+            results.append(givenPC ^ mask)
+        logMsg = self._createHexListString(results)
+        logging.info("Created possibilities\n\t%s" % logMsg)
+        return results
+
+    def _determineNumberOfDigits(self, givenPC):
+        digits = 0
+        for i in range(0,9):
+            if(givenPC >= math.pow(16,i)):
+                digits = digits + 1
+        logging.debug("Number of digits for PC 0x{:X} is {:d}".format(givenPC, digits))
+        return digits
+
+    def _cleanupWrongPossibilities(self, listOfPossibilities):
+        logging.debug("Cleaning up all wrong PC possibilities")
+        validPoss = []
+        for i in range(0, len(listOfPossibilities)):
+            poss = listOfPossibilities[i]
+            if(self._isInCFG(poss)):
+                for x in range(0, len(self.cfg)):
+                    bb = self.cfg[x]
+                    if bb.isValidAddressForBasicBlock(poss):
+                        validPoss.append(poss)
+                        break
+        logMsg = self._createHexListString(validPoss)
+        logging.info("Remaining possibilities\n\t%s" % logMsg)
+        return validPoss
+
+    def _cleanupIntraBlockPC(self, origBB, listOfPossibilities):
+        logging.debug("Cleaning up all Intra block PC possibilities")
+        validPoss = []
+        for i in range(0, len(listOfPossibilities)):
+            poss = listOfPossibilities[i]
+            bbID = self._determineBasicBlockID(poss)
+            if (bbID != origBB):
+                validPoss.append(poss)
+        logMsg = self._createHexListString(validPoss)
+        logging.info("Remaining possibilities\n\t%s" % logMsg)
+        return validPoss
+
+    def _cleanupInterBlockPC(self, origBB, listOfPossibilities):
+        logging.debug("Cleaning up all Inter block PC possibilities")
+        validPoss = []
+        for i in range(0, len(listOfPossibilities)):
+            poss = listOfPossibilities[i]
+            bbID = self._determineBasicBlockID(poss)
+            if(bbID == origBB):
+                validPoss.append(poss)
+        logMsg = self._createHexListString(validPoss)
+        logging.info("Remaining possibilities\n\t%s" % logMsg)
+        return validPoss
+
+    def _cleanupTrueFalseJumpAddresses(self, pc, listOfPoss):
+        validPoss = []
+        origBB = self._determineBasicBlockID(pc)
+        if self.cfg[origBB].isEndAddress(pc):
+            logging.debug("Cleaning up all True jump and False jump addresses")
+            for i in range(0, len(listOfPoss)):
+                poss = listOfPoss[i]
+                if (not self.cfg[origBB].isTrueJumpAddress(poss)) and (not self.cfg[origBB].isFalseJumpAddress(poss)):
+                    validPoss.append(poss)
+            logMsg = self._createHexListString(validPoss)
+            logging.info("Remaining possibilities\n\t%s" % logMsg)
+            return validPoss
+        else:
+            return listOfPoss
+
+    def _possibleNewPCList(self, pc, cleanupIntra, cleanupInter):
+        allPossibilities = self._createAllPossibleOneBitFlipResults(pc)
+        validPoss = self._cleanupWrongPossibilities(allPossibilities)
+        if (cleanupIntra):
+            validPoss = self._cleanupIntraBlockPC(self._determineBasicBlockID(pc), validPoss)
+        if (cleanupInter):
+            validPoss = self._cleanupInterBlockPC(self._determineBasicBlockID(pc),validPoss)
+        fullyCleaned = self._cleanupTrueFalseJumpAddresses(pc, validPoss)
+        return fullyCleaned
+
+    def _createHexListString(self, listToLog):
+        logMSG = "["
+        for i in range(0, len(listToLog)):
+            logMSG += " 0x%X" % listToLog[i]
+        logMSG += "]"
+        return logMSG
+
+    def _isInCFG(self, givenPC):
+        startAddressCFG = self.cfg[0].getStartAddress()
+        endAddressCFG = self.cfg[len(self.cfg)-1].getEndAddress()
+        if(givenPC >=startAddressCFG) and (givenPC <=endAddressCFG):
+            return True
+        else:
+            return False
+
+    def _initExcelSheet(self, nameSheet,typeInjection, numberOfCFEs):
+        #Create a new worksheet
+        ws = self.workbook.create_sheet(title=nameSheet)
+        # A1 Holds info about number of CFEs injected
+        ws['A1'] = "Results of the CFE injection, {}, with {:d} faults injected".format(typeInjection, numberOfCFEs)
+        # Create head of table
+        ws.cell(row=2, column=1).value="Orig PC"
+        ws.cell(row=2, column=2).value="Injected PC"
+        ws.cell(row=2, column=3).value="Det.Sig."
+        ws.cell(row=2, column=4).value="Hardfault"
+        ws.cell(row=2, column=5).value="Undet. WrongResult"
+        ws.cell(row=2, column=6).value="Undet. CorrectResult"
+        return ws
+
+    def _writeToExcel(self, worksheet, namesheet, row, origPC, injPC, detected, hardFault, undWR, undCR):
+        # Fill content into worksheet
+        worksheet.cell(row=row, column=1).value=("0x%X" % origPC)
+        worksheet.cell(row=row, column=2).value=("0x%X" % injPC)
+        worksheet.cell(row=row, column=3).value= detected
+        worksheet.cell(row=row, column=4).value= hardFault
+        worksheet.cell(row=row, column=5).value= undWR
+        worksheet.cell(row=row, column=6).value = undCR
+        # Save workbook
+        self.workbook.save("resultsCFEInjectionYACCA.xlsx")
+        logging.info("Written results to Excel")
+        return self.workbook.get_sheet_by_name(namesheet)

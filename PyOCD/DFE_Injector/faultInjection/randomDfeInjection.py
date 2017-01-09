@@ -1,0 +1,174 @@
+__author__ = 'Jens Vankeirsbilck'
+
+import logging
+from pyOCD.board import MbedBoard
+import os
+import random
+from time import sleep
+from openpyxl import load_workbook
+
+class RandomDFE:
+
+    def __init__(self):
+        self.board = self._initialize()
+        self.target = self.board.target
+        self.workBook = load_workbook('{}/{}'.format(os.path.dirname(os.path.dirname(__file__)),
+                                                     'resultsRandomInjection.xlsx'))
+        self.regList = ['r0','r1','r2','r3','r4','r5','r6','r7','r8','r9','r10','r11','r12']
+
+    def unInit(self):
+        if self.board != None:
+            logging.info("Board uninitialised")
+            self.board.uninit()
+
+    def injectionSuite(self, nrOfFaults, nameSheet):
+        """
+            Function to inject a whole bunch of faults
+        """
+        ws = self._initExcelSheet(nameSheet, nrOfFaults)
+        for i in range(0, nrOfFaults):
+            logging.log(25, "Injecting fault %d", i)
+            sleep(random.random()*2)
+            self.hardFault = 0
+            self.wrongRes = 0
+            self.undetectedFaults = 0
+            reg = self.regList[random.randint(0,12)]
+            bitPos = random.randint(0,31)
+            logging.debug("Flipping bit on pos. {} of register %d".format(bitPos, reg))
+            try:
+                self.target.halt()
+                pcValue = self.target.readCoreRegister('pc')
+                logging.debug("PC value = 0x%X", pcValue)
+                self._injectFaultRegister(reg, bitPos)
+                self.target.resume()
+                logging.debug("flipped the bit")
+                sleep(random.random()+0.3)
+                self._checkError()
+                self._writeToExcel(ws, nameSheet, i+3, pcValue, reg, bitPos, self.hardFault, self.wrongRes, self.undetectedFaults)
+            except Exception as e:
+                logging.error("Could not inject fault!\n%s" % e)
+                raw_input("!ERROR! Unplug MBED, reset and then press Enter...")
+                self.board = self._initialize()
+                self.target = self.board.target
+        logging.log(25,"************************************")
+        logging.log(25,"FINISHED")
+
+
+
+    # Private methods
+    def _initialize(self):
+        """
+            Used to initialize the mbed
+        """
+        board = None
+        try:
+            # Search mbed and initialize
+            board = MbedBoard.chooseBoard()
+            target_type = board.getTargetType()
+
+            # Needed to write to memory
+            if target_type != "lpc1768":
+                raise Exception("Only lpc_1768 supported for this small fault injector")
+        finally:
+            if board != None:
+                return board
+
+    def _injectFaultRegister(self, reg, bitPos):
+        """
+            Function to inject a fault at the given register
+        :param reg: register where the bit-flip must occur
+        :param bitPos: position of the bit that must be flipped
+        """
+        logging.info("Start to inject fault in register %s" % reg)
+        bitToFlip = 1 << bitPos
+        try:
+            # Read and print content of register
+            content = self.target.readCoreRegister(reg)
+            logging.debug("Content of register: 0x%X" % content)
+            # Bit-flip content by XOR with bitToFlip
+            content ^= bitToFlip
+            logging.debug("New content: 0x%X" % content)
+            # Write new content to register
+            self.target.writeCoreRegister(reg, content)
+            logging.log(25, "Successfully inject fault into %s" % reg)
+        except Exception as e:
+            logging.error("Could not inject fault into {}!\n{}".format(reg, e))
+            raise e
+
+    def _reset(self):
+        try:
+            logging.info("Resetting device")
+            self.target.reset()
+        except Exception as e:
+            logging.error("Could not reset target!\n%s" % e)
+            raise e
+
+    def _checkError(self):
+        """
+            Function to check if the injected fault had an effect
+        """
+        try:
+            self.target.halt()
+            # Read PC
+            pc = self.target.readCoreRegister('pc')
+            # create masks
+            hardFault = 0x000
+            WrongRes = 0x000
+            # check for faults
+            if pc == hardFault:
+                self.hardFault = 1
+                logging.info("----HardFault----")
+            elif pc == WrongRes:
+                self.wrongRes = 1
+                logging.info("----DetectedFault----")
+            else:
+                self.undetectedFaults = 1
+                logging.info("----No Effect----")
+        except Exception as e:
+            logging.error("Could not determine if fault had effect!\n%s" % e)
+        finally:
+            self._reset()
+
+    def _timeFrame(self):
+        try:
+            self.target.halt()
+            sleep(0.05)
+            status = self.target.readMemory(0x10005000)
+            sleep(0.05)
+            if status == 1:
+                return True
+            else:
+                return False
+        except Exception as e:
+            logging.error("Could not determine if correct TimeFrame!\n%s" % e)
+
+    def _writeToExcel(self, workSheet, nameSheet, row, PCvalue, reg,  bitPos, hardFault, WrongRes, undetFault):
+        # Fill content into cells
+        workSheet.cell(row=row, column=1).value = ("0x%X" % PCvalue)
+        workSheet.cell(row=row, column=2).value = reg
+        workSheet.cell(row=row, column=3).value = bitPos
+        workSheet.cell(row=row, column=4).value = hardFault
+        workSheet.cell(row=row, column=5).value = WrongRes
+        workSheet.cell(row=row, column=6).value = undetFault
+        # Save workbook
+        self.workBook.save("resultsRandomInjection.xlsx")
+        logging.info("Successfully written to Excel sheet")
+        # return worksheet
+        return self.workBook.get_sheet_by_name(nameSheet)
+
+    def _initExcelSheet(self, nameSheet, nrOfDFE):
+        # Create a new worksheet
+        ws = self.workBook.create_sheet()
+        # Set title
+        ws.title = nameSheet
+        # A1 holds info about tries/bit
+        ws['A1'] = ("Results of the %s random DFE injection" % nrOfDFE)
+        # Fill in row 2, head of table
+        ws.cell(row = 2, column = 1).value = "PC Value"
+        ws.cell(row = 2, column = 2).value = "Injected Register"
+        ws.cell(row = 2, column = 3).value = "BitPos"
+        ws.cell(row = 2, column = 4).value = "HardFault"
+        ws.cell(row = 2, column = 5).value = "Wrong Result"
+        ws.cell(row = 2, column = 6).value = "No Effect"
+        # Return ws
+        return ws

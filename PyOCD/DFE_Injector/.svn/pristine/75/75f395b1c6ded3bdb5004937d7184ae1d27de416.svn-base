@@ -1,0 +1,335 @@
+__author__ = 'Jens Vankeirsbilck'
+
+from pyOCD.board import MbedBoard
+from instruction.instruction import Instruction
+import logging
+import os
+import random
+from time import sleep
+from openpyxl import load_workbook
+
+class InstructionAwareFI:
+    def __init__(self):
+        self.board = self._initialize()
+        self.target = self.board.target
+        self.workBook = load_workbook('{}/{}'.format(os.path.dirname(os.path.dirname(__file__)),
+                                                     'resultsFaultInjectionV2.xlsx'))
+
+    def unInit(self):
+        if self.board != None:
+            logging.info("Board uninitialised")
+            self.board.uninit()
+
+    def injectionSuite(self, triesPerBit, nameSheet):
+        """
+            Function to inject a whole bunch of faults
+        """
+        ws = self._initExcelSheet(nameSheet, triesPerBit)
+        self.effectsSuite = 0
+        for i in range(0, 32):
+            self.hardFaults = 0
+            self.watchdogFaults = 0
+            self.detectedFaults = 0
+            self.undetectedFaults = 0
+            faultsInjected = 0
+            logging.log(25, "Bit to Flip : 0x%X" % (1 << i))
+            while faultsInjected < triesPerBit:
+                try:
+                    while not self._timeFrame():
+                        logging.info("Wrong time frame, new try will start shortly")
+                        self.target.resume()
+                        sleep(0.05 + random.random()*0.1)
+                    success = self.injectInstructionAware(i)
+                    if success:
+                        faultsInjected += 1
+                        logging.log(25, "Injected fault nr %s" % faultsInjected)
+                        # Sleep so that the watchDog can run out
+                        sleep(0.6)
+                        # check for error
+                        self._checkError()
+                        sleepTime = 0.2 + random.random() * 0.02
+                        sleep(sleepTime)
+                except Exception as e:
+                    logging.error("Could not inject fault!\n%s" % e)
+                    raw_input("!ERROR! Unplug MBED and then press Enter...")
+                    self.board = self._initialize()
+                    self.target = self.board.target
+            # Write results to Excel file
+            ws = self._writeToExcel(ws, nameSheet, (i+3), (1 << i), self.hardFaults, self.watchdogFaults,
+                               self.detectedFaults, self.undetectedFaults)
+        logging.log(25,"************************************")
+        logging.log(25,"FINISHED")
+
+    def injectionSuiteDeterDFE(self, nrOfDFEs, nameSheet):
+        ws = self._initExcelSheetDeterDFE(nameSheet, nrOfDFEs)
+        for i in range(0, nrOfDFEs):
+            self.memLoc = 0
+            self.HF = 0
+            self.WR = 0
+            self.NE = 0
+            logging.log(25, "Injecting Deter DFE nr. %d" % i)
+            bitPos = random.randint(0,31)
+            success = False
+            while not success:
+                try:
+                    while not self._timeFrame():
+                        logging.debug("Wrong time frame, new try will start shortly")
+                        self.target.resume()
+                        sleep(0.05 + random.random()*0.1)
+                    success = self.injectInstructionAware(bitPos)
+                    if success:
+                        logging.info("Successfully injected bit-flip on pos %d" % bitPos)
+                        sleep(.3)
+                        self._checkErrorDetCFE()
+                        sleepTime = 0.2 + random.random() * 0.02
+                        sleep(sleepTime)
+                except Exception as e:
+                    logging.error("Could not inject fault!\n%s" % e)
+                    raw_input("!ERROR! Unplug MBED and then press Enter...")
+                    self.board = self._initialize()
+                    self.target = self.board.target
+            ws = self._writeToExcelDeterDFE(ws, nameSheet, i+3, self.memLoc ,bitPos,self.HF, self.WR, self.NE)
+        logging.log(25,"************************************")
+        logging.log(25,"FINISHED")
+
+
+
+
+    def injectInstructionAware(self, bitPos):
+        """
+            Function to inject a fault instruction aware
+        :param bitPos:  position of the bit to flip
+        """
+        success = False
+        try:
+            self.target.halt()
+            instruction = Instruction(self.target)
+            values = instruction.getNecessaryValues()
+            if values is not None:
+                if isinstance(values, dict):
+                    logging.debug("Values is a dictionary, extracting and calculating memory address")
+                    if 'Rn' in values:
+                        base = self._readReg(values['Rn'])
+                        sleep(0.05)
+                        offset = self._readReg(values['Rm'])
+                        if 'shift' in values:
+                            offset = offset << values['shift']
+                        memAddress = base + offset
+                    else:
+                        base = self._readReg(values['base'])
+                        if 'U' in values:
+                            if values['U'] == 1:
+                                memAddress = base + values['offset']
+                            else:
+                                memAddress = base - values['offset']
+                        else:
+                            memAddress = base + values['offset']
+                    self._injectFaultMemoryLocation(memAddress, bitPos)
+                    self.memLoc = ("0x%X" % memAddress)
+                else:
+                    logging.debug("Values is a register, will inject fault there")
+                    self._injectFaultRegister(values, bitPos)
+                    self.memLoc = values
+                success = True
+            else:
+                logging.log(25, "Values was None ------------------> No fault injected!")
+                success = False
+        except Exception as e:
+            logging.error("Could not inject a fault instruction aware!\n%s" % e)
+        finally:
+            logging.info("Resuming target")
+            self.target.resume()
+            return success
+
+    # Private methods
+    def _initialize(self):
+        """
+            Used to initialize the mbed
+        """
+        board = None
+        try:
+            # Search mbed and initialize
+            board = MbedBoard.chooseBoard()
+            target_type = board.getTargetType()
+
+            # Needed to write to memory
+            if target_type != "lpc1768":
+                raise Exception("Only lpc_1768 supported for this small fault injector")
+        finally:
+            if board != None:
+                return board
+
+    def _readReg(self, register):
+        try:
+            value = self.target.readCoreRegister(register)
+            return value
+        except Exception as e:
+            logging.error("Could not read register {}\n{}".format(register, e))
+
+    def _injectFaultMemoryLocation(self, memAddress, bitToFlip):
+        """
+            Function to inject a fault at the given memory address
+        :param memAddress: address where the bit-flip must occur
+        :param bitToFlip: position of the bit that must be flipped
+        """
+        mask = 1 << bitToFlip
+        try:
+            logging.debug("Reading memory location")
+            current = self.target.readMemory(memAddress)
+            newCurrent = current ^ mask
+            logging.debug("Writing new content to memory location")
+            self.target.writeMemory(memAddress, newCurrent)
+            logging.log(25, "Successfully injected fault into 0x%X" % memAddress)
+            logging.debug("Value was 0x{:X}, changed to 0x{:X}".format(current, newCurrent))
+        except Exception as e:
+            logging.error("Could not inject fault into 0x{:X}\n{}".format(memAddress, e))
+
+    def _injectFaultRegister(self, reg, bitPos):
+        """
+            Function to inject a fault at the given register
+        :param reg: register where the bit-flip must occur
+        :param bitPos: position of the bit that must be flipped
+        """
+        logging.info("Start to inject fault in register %s" % reg)
+        bitToFlip = 1 << bitPos
+        try:
+            # Read and print content of register
+            content = self.target.readCoreRegister(reg)
+            logging.debug("Content of register: 0x%X" % content)
+            # Bit-flip content by XOR with bitToFlip
+            content ^= bitToFlip
+            logging.debug("New content: 0x%X" % content)
+            # Write new content to register
+            self.target.writeCoreRegister(reg, content)
+            logging.log(25, "Successfully inject fault into %s" % reg)
+        except Exception as e:
+            logging.error("Could not inject fault into {}!\n{}".format(reg, e))
+
+    def _reset(self):
+        try:
+            logging.info("Resetting device")
+            self.target.reset()
+        except Exception as e:
+            logging.error("Could not reset target!\n%s" % e)
+
+    def _checkError(self):
+        """
+            Function to check if the injected fault had an effect
+        """
+        try:
+            self.target.halt()
+            # Read PC
+            pc = self.target.readCoreRegister('pc')
+            # create masks
+            hardFault = 0x000
+            watchDog = 0x000
+            detectedFaults = 0x000
+            # check for faults
+            if pc == hardFault:
+                self.hardFaults += 1
+                self.effectsSuite += 1
+                logging.log(25, "----HardFault----")
+            elif pc == watchDog:
+                self.watchdogFaults += 1
+                self.effectsSuite += 1
+                logging.log(25, "----WatchDogFault----")
+            elif pc == detectedFaults:
+                self.detectedFaults += 1
+                self.effectsSuite += 1
+                logging.log(25, "----DetectedFault----")
+            else:
+                self.undetectedFaults += 1
+                logging.log(25, "----No Effect----")
+        except Exception as e:
+            logging.error("Could not determine if fault had effect!\n%s" % e)
+        finally:
+            self._reset()
+
+    def _checkErrorDetCFE(self):
+        HF = 0x26e
+        WR = 0x2b2
+        try:
+            self.target.halt()
+            pc = self.target.readCoreRegister('pc')
+            if pc == HF:
+                logging.debug("Fault caused HF")
+                self.HF = 1
+            elif pc == WR:
+                logging.debug("Fault caused WR")
+                self.WR = 1
+            else:
+                logging.debug("Fault had no effect")
+                self.NE = 1
+        except Exception as e:
+            logging.error("Could not determine fault type!\n%s" % e)
+            raise e
+        finally:
+            self._reset()
+
+
+    def _timeFrame(self):
+        try:
+            self.target.halt()
+            sleep(0.05)
+            status = self.target.readMemory(0x10005000)
+            sleep(0.05)
+            if status == 1:
+                return True
+            else:
+                return False
+        except Exception as e:
+            logging.error("Could not determine if correct TimeFrame!\n%s" % e)
+
+    def _writeToExcel(self, workSheet, nameSheet, row, bitPos, hardFaults, watchdogFaults, detFaults, unDetFaults):
+        # Fill content into cells
+        workSheet.cell(row=row, column=1).value = ("0x%X" % bitPos)
+        workSheet.cell(row=row, column=2).value = hardFaults+watchdogFaults+detFaults
+        workSheet.cell(row=row, column=3).value = hardFaults
+        workSheet.cell(row=row, column=4).value = watchdogFaults
+        workSheet.cell(row=row, column=5).value = detFaults
+        workSheet.cell(row=row, column=6).value = unDetFaults
+        fomula = "=(B{0}/(B{0} + F{0}))*100".format(row)
+        workSheet.cell(row=row, column=7).value = fomula
+        # Save workbook
+        self.workBook.save("resultsFaultInjectionV2.xlsx")
+        logging.info("Successfully written to Excel sheet")
+        # return worksheet
+        return self.workBook.get_sheet_by_name(nameSheet)
+
+    def _initExcelSheet(self, nameSheet, tries):
+        # Create a new worksheet
+        ws = self.workBook.create_sheet()
+        # Set title
+        ws.title = nameSheet
+        # A1 holds info about tries/bit
+        ws['A1'] = ("Results of the fault injection, with %s tries per bit" % tries)
+        # Fill in row 2, head of table
+        ws.cell(row = 2, column = 1).value = "Bitmask"
+        ws.cell(row = 2, column = 2).value = "Effect"
+        ws.cell(row = 2, column = 3).value = "HardFaults"
+        ws.cell(row = 2, column = 4).value = "WatchDogFaults"
+        ws.cell(row = 2, column = 5).value = "DetectedFaults"
+        ws.cell(row = 2, column = 6).value = "unDetectedFaults"
+        ws.cell(row = 2, column = 7).value = "Efficiency"
+        # Return ws
+        return ws
+
+    def _initExcelSheetDeterDFE(self, nameSheet, nrOfDFEs):
+        ws = self.workBook.create_sheet()
+        ws.title = nameSheet
+        ws['A1'] = ("Results of the %d deterministic DFE injection" % nrOfDFEs)
+        ws.cell(row=2, column=1).value = "Mem. Loc."
+        ws.cell(row=2, column=2).value = "BitPos"
+        ws.cell(row=2, column=3).value = "HardFault"
+        ws.cell(row=2, column=4).value = "Wrong Result"
+        ws.cell(row=2, column=5).value = "No Effect"
+        return ws
+
+    def _writeToExcelDeterDFE(self, worksheet, nameSheet, row, memLoc, bitPos, HF, WR, NE):
+        worksheet.cell(row=row, column=1).value = memLoc
+        worksheet.cell(row=row, column=2).value = bitPos
+        worksheet.cell(row=row, column=3).value = HF
+        worksheet.cell(row=row, column=4).value = WR
+        worksheet.cell(row=row, column=5).value = NE
+        self.workBook.save("resultsFaultInjectionV2.xlsx")
+        return self.workBook.get_sheet_by_name(nameSheet)

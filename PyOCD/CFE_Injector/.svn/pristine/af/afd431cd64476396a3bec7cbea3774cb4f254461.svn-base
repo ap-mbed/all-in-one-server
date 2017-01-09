@@ -1,0 +1,828 @@
+__author__ = 'Jens Vankeirsbilck'
+
+import logging
+from CFG.basicBlock import BasicBlock
+from PC_injector import PCinjector
+from time import sleep
+import math
+import random
+from openpyxl import load_workbook
+import os
+
+class CFEInjector:
+    def __init__(self,disassemblyName,skip='0',board=None):
+        self.pcInjector = PCinjector(board)
+        self.workbook = load_workbook('{}/{}'.format(os.path.dirname(os.path.dirname(__file__)),
+                                                     'randomCFEInjection.xlsx'))
+        self.cfg = self._createCFG(disassemblyName,skip)
+
+    def injectInterBlockJumpOneBitFlip(self):
+        try:
+            origPC = self.pcInjector.readPC()
+            logging.debug("Read PC: 0x%X" % origPC)
+            origBB = self._determineBasicBlockID(origPC)
+            possNewPC = self._possibleNewPCList(origPC,True,False)
+            bitFlippedPC = possNewPC[random.randint(0, len(possNewPC)-1)]
+            logging.log(25, "PC to inject: 0x%X" % bitFlippedPC)
+            if not self.cfg[origBB].isEndAddress(origPC):
+                self.pcInjector.writeNewPC(bitFlippedPC)
+                logging.info("Injected Inter Block jump from 0x{:X} to 0x{:X}".format(origPC,bitFlippedPC))
+            elif (not self.cfg[origBB].isTrueJumpAddress(bitFlippedPC)) and \
+                    (not self.cfg[origBB].isFalseJumpAddress(bitFlippedPC)):
+                self.pcInjector.writeNewPC(bitFlippedPC)
+                logging.info("Injected Inter Block jump from 0x{:X} to 0x{:X}".format(origPC,bitFlippedPC))
+            else:
+                logging.info("Could not inject inter block jump due to the bitFlipped PC having the value of "
+                             "TrueJumpAddress or FalseJumpAddress")
+        except Exception as e:
+            logging.error("Failed to inject an inter block jump!\n%s" % e)
+            raise Exception("Failed to inject Inter Block Jump")
+
+    def checkError(self, errorHandlingAddress):
+        try:
+            pc = self.pcInjector.readPC()
+            if(pc == errorHandlingAddress):
+                return True
+            else:
+                return False
+        except Exception as e:
+            logging.error("Failed to check for errorHandling:\n%s" % e)
+            raise Exception("Failed to check for error")
+
+    def checkErrorBB(self, bb):
+        try:
+            pc = self.pcInjector.readPC()
+            bbPC = self._determineBasicBlockID(pc)
+            if(bbPC == bb):
+                return True
+            else:
+                return False
+        except Exception as e:
+            logging.error("Failed to check for errorBB:\n%s" % e)
+            raise Exception("Failed to check for error")
+
+    def injectInterBlockWithErrorCheck(self):
+        try:
+            self.injectInterBlockJumpOneBitFlip()
+            sleep(2)
+            if(self.checkError(0x276)):
+                logging.log(25, "Injected Inter Block Jump was detected")
+            else:
+                logging.log(25, "Injected Inter Block Jump was undetected")
+        except Exception as e:
+            logging.error("Inter Block jump injection failed!\n%s" % e)
+        finally:
+            self.pcInjector.reset()
+
+    def injectionSuiteInterBlock(self, numberOfCFEs, nameSheet):
+        # get Excel worksheet
+        ws = self._initExcelSheet(nameSheet, "Inter Block only", numberOfCFEs)
+        for i in range(0, numberOfCFEs):
+            sleep(random.random()*2)
+            detected = 0
+            hardFault = 0
+            undWR = 0
+            undCR = 0
+            self.intra = 0
+            self.inter = 1
+            self.outFunction = 0
+            faultInjected = False
+            while not faultInjected:
+                try:
+                    origPC = self.pcInjector.readPC()
+                    logging.info("Read PC: 0x%X" % origPC)
+                    possNewPC = self._possibleNewPCList(origPC,True,False,True)
+                    bitFlippedPC = possNewPC[random.randint(0, len(possNewPC)-1)]
+                    logging.info("PC to inject: 0x%X" % bitFlippedPC)
+                    self.pcInjector.writeNewPC(bitFlippedPC)
+                    sleep(.3)
+                    if(self.checkError(0x000)):
+                        detected = 1
+                        logging.debug("InterBlock detected")
+                    elif(self.checkError(0x27a)):
+                        hardFault = 1
+                        logging.debug("Hardfault detetected")
+                    elif(self.checkError(0x2e0)):
+                    #elif self.checkErrorBB(4):
+                        logging.debug("InterBlock undetected, wrong result")
+                        undWR = 1
+                    else:
+                        undCR =1
+                        logging.debug("InterBlock undetected, correct result")
+                    faultInjected = True
+                    ws = self._writeToExcel(ws, nameSheet,i+3,origPC,bitFlippedPC,detected,hardFault,undWR, undCR)
+                except Exception as e:
+                    logging.error("Error while injecting CFE\n%s"%e)
+                finally:
+                    self.pcInjector.reset()
+        logging.log(25,"*****************************\nFINISHED")
+
+    def injectionSuiteIntraBlock(self, numberOfCFEs, nameSheet):
+        # get Excel worksheet
+        ws = self._initExcelSheet(nameSheet, "Intra Block only", numberOfCFEs)
+        for i in range(0, numberOfCFEs):
+            sleep(random.random()*2)
+            detected = 0
+            hardFault = 0
+            undWR = 0
+            undCR = 0
+            self.intra = 1
+            self.inter = 0
+            self.outFunction = 0
+            faultInjected = False
+            while not faultInjected:
+                try:
+                    origPC = self.pcInjector.readPC()
+                    logging.info("Read PC: 0x%X" % origPC)
+                    possNewPC = self._possibleNewPCList(origPC,False,True,True)
+                    bitFlippedPC = possNewPC[random.randint(0, len(possNewPC)-1)]
+                    logging.info("PC to inject: 0x%X" % bitFlippedPC)
+                    self.pcInjector.writeNewPC(bitFlippedPC)
+                    sleep(.3)
+                    if(self.checkError(0x000)):
+                        detected = 1
+                        logging.debug("InterBlock detected")
+                    elif(self.checkError(0x27a)):
+                        hardFault = 1
+                        logging.debug("Hardfault detetected")
+                    elif(self.checkError(0x2e0)):
+                    #elif self.checkErrorBB(4):
+                        logging.debug("IntraBlock undetected, wrong result")
+                        undWR = 1
+                    else:
+                        undCR =1
+                        logging.debug("IntraBlock undetected, correct result")
+                    faultInjected = True
+                    ws = self._writeToExcel(ws, nameSheet,i+3,origPC,bitFlippedPC,detected,hardFault,undWR, undCR)
+                except Exception as e:
+                    logging.error("Error while injecting CFE\n%s"%e)
+                finally:
+                    self.pcInjector.reset()
+        logging.log(25,"*****************************\nFINISHED")
+
+    def injectionSuiteOutFunction(self, numberOfCFEs, nameSheet):
+        # get Excel worksheet
+        ws = self._initExcelSheet(nameSheet, "Out Function only", numberOfCFEs)
+        for i in range(0, numberOfCFEs):
+            sleep(random.random()*2)
+            detected = 0
+            hardFault = 0
+            undWR = 0
+            undCR = 0
+            self.intra = 0
+            self.inter = 0
+            self.outFunction = 1
+            faultInjected = False
+            while not faultInjected:
+                try:
+                    origPC = self.pcInjector.readPC()
+                    logging.info("Read PC: 0x%X" % origPC)
+                    possNewPC = self._possibleNewPCList(origPC,True,True,False)
+                    bitFlippedPC = possNewPC[random.randint(0, len(possNewPC)-1)]
+                    logging.info("PC to inject: 0x%X" % bitFlippedPC)
+                    self.pcInjector.writeNewPC(bitFlippedPC)
+                    sleep(.3)
+                    if(self.checkError(0x000)):
+                        detected = 1
+                        logging.debug("InterBlock detected")
+                    elif(self.checkError(0x27a)):
+                        hardFault = 1
+                        logging.debug("Hardfault detetected")
+                    elif(self.checkError(0x2e0)):
+                    #elif self.checkErrorBB(4):
+                        logging.debug("IntraBlock undetected, wrong result")
+                        undWR = 1
+                    else:
+                        undCR =1
+                        logging.debug("IntraBlock undetected, correct result")
+                    faultInjected = True
+                    ws = self._writeToExcel(ws, nameSheet,i+3,origPC,bitFlippedPC,detected,hardFault,undWR, undCR)
+                except Exception as e:
+                    logging.error("Error while injecting CFE\n%s"%e)
+                finally:
+                    self.pcInjector.reset()
+        logging.log(25,"*****************************\nFINISHED")
+
+    def randomCfeSuite(self, numberOfCFEs, nameSheet):
+        ws = self._initExcelSheet(nameSheet, "Random CFE", numberOfCFEs)
+        for i in range (0, numberOfCFEs):
+            logging.log(25, "injecting CFE %d" % i)
+            sleep(random.random()*2)
+            hardFault = 0
+            WR = 0
+            noEffect = 0
+            self.intra = 0
+            self.inter = 0
+            self.outFunction = 0
+            faultInjected = False
+            while not faultInjected:
+                bitPos = random.randint(0, 31)
+                try:
+                    origPC = self.pcInjector.readPC()
+                    origBB = self._determineBasicBlockID(origPC)
+                    logging.debug("Read PC: 0x{:X} is part of BB {:d}".format(origPC, origBB))
+                    newPC = origPC ^(1 << bitPos)
+                    self.pcInjector.writeNewPC(newPC)
+                    sleep(.3)
+                    if(self.checkError(0x27a)):
+                        hardFault = 1
+                        logging.debug("HardFault")
+                    elif(self.checkError(0x2e0)):
+                        WR = 1
+                        logging.debug("Wrong Result")
+                    else:
+                        noEffect = 1
+                        logging.debug("No Effect")
+                    faultInjected = True
+                    self._determineJumpType(origPC, newPC)
+                    ws = self._writeToExcel(ws, nameSheet, i+3, origPC, newPC, 0, hardFault, WR, noEffect)
+                except Exception as e:
+                    logging.error("Error while injecting CFE\n%s" %e)
+                    faultInjected = False
+                    hardFault = 0
+                    WR = 0
+                    noEffect = 0
+                    self.intra = 0
+                    self.inter = 0
+                    self.outFunction = 0
+                finally:
+                    self.pcInjector.reset()
+        logging.log(25, "**********************\nFINISHED")
+
+    def injectionBatchesInterBlock(self, numberOfBatches, numberOfCFEs):
+        for i in range(0,numberOfBatches):
+            logging.log(25, "Starting batch %i\n" % i)
+            nameSheet = input("Give in the name of the Excel worksheet to save the data: \n")
+            self.injectionSuiteInterBlock(numberOfCFEs, nameSheet)
+        logging.log(25, "##############################################\nFINISHED all BATCHES\n##############################################")
+
+    def deterministicCFEsuite(self, nrIntra, nrInter, nrOutFunc):
+        if nrIntra != 0:
+            logging.log(25, "-------------Starting the IntraBlock injection-------------")
+            self.injectionSuiteIntraBlock(nrIntra, "IntraBlockCFE")
+            logging.log(25, "-------------Finished the IntraBlock injection-------------")
+        if nrInter != 0:
+            logging.log(25, "-------------Starting the InterBlock injection-------------")
+            self.injectionSuiteInterBlock(nrInter, "InterBlockCFE")
+            logging.log(25, "-------------Finished the InterBlock injection-------------")
+        if nrOutFunc != 0:
+            logging.log(25, "-------------Starting the OutFunction injection-------------")
+            self.injectionSuiteOutFunction(nrOutFunc, "OutFunctionCFE")
+            logging.log(25, "-------------Finished the OutFunction injection-------------")
+        logging.log(25, "##############################################\nFINISHED all Injection\n##############################################")
+
+    # BEGIN Code of Melissa Paumard. May need refactoring
+    def validationEdges(self, cfg, dictionnaryNumBeginning, disassemblyFileName):
+        '''
+        Verify that Edges are valid. First they are written in a .txt file, then this one is compared to an other .txt file containing the correct Edges.
+        Return a boolean to indicate the validity of the Control Flow Graph.
+
+        :param cfg: A Control Flow Graph
+        :param dictionnaryNumBeginning: The dictionnary which contain the beginning of all basics blocks as keys and the basic block number as values.
+        Keys are str (the hexadecimal form) and values are int.
+        :param disassemblyFileName: The name and access path of a disassembly file
+        :type cfg: list
+        :type dictionnaryNumBeginning: dict
+        :type disassemblyFileName: str
+        :return result: a boolean
+        '''
+
+        #Write the Edges of the parameter Control Flow Graph on a .txt file
+        with open("ValidateEdges.txt","w") as myFile:
+            for k in range(len(cfg)):
+                myFile.write("BB: " + str(k) + "\n\t")
+                myFile.write(str(k) + " --> ")
+                #Translate the int Jump to str in its hexadecimal form. This way we can use the dictionnaryNumBegginning
+                falseJump=hex(cfg[k].falseJumpAddress)[2:]
+                trueJump=hex(cfg[k].trueJumpAddress)[2:]
+                #If Jumps are not -1
+                if(falseJump!='x1' and trueJump!='x1'):
+                    falseJump=dictionnaryNumBeginning[falseJump]
+                    trueJump=dictionnaryNumBeginning[trueJump]
+                    if(falseJump==trueJump):
+                        myFile.write(str(falseJump))
+                    elif(falseJump<trueJump):
+                        myFile.write(str(falseJump) + "\n\t")
+                        myFile.write(str(k) + " --> " + str(trueJump))
+                    else:
+                        myFile.write(str(trueJump) + "\n\t")
+                        myFile.write(str(k) + " --> " + str(falseJump))
+                #If the trueJump is not -1
+                elif(falseJump=='x1' and trueJump!='x1'):
+                    trueJump = dictionnaryNumBeginning[trueJump]
+                    myFile.write(str(trueJump))
+                #If the falseJump is not -1
+                elif (falseJump != 'x1' and trueJump == 'x1'):
+                    falseJump = dictionnaryNumBeginning[falseJump]
+                    myFile.write(str(falseJump))
+                #If Jumps are -1
+                else:
+                    myFile.write("-1")
+                myFile.write("\n\n")
+
+        #Result is initialized to True
+        result=True
+
+        #Create the name of the correct Edges file. The layout must be Edges + the name of the parameter disassembly file without .disasm
+        fileTitle="Edges" + disassemblyFileName[0:-7] + ".txt"
+
+        #Opens the two files that we want to compare and read them line by line.
+        with open (fileTitle,"r") as myFile:
+            file1=myFile.readlines()
+        with open ("ValidateEdges.txt","r") as myFile:
+            file2=myFile.readlines()
+        #If the two files have the same length but one line is not the same in the two file, result become False
+        if (len(file1)==(len(file2))):
+            for i in range (len(file1)):
+                if file1[i]!=file2[i]:
+                    result=False
+        #If the two files don't have the same length, result become False
+        else:
+            result=False
+        return result
+
+    def createBeginningAndEnd(self, disassemblyFileName, skip='0'):
+        '''
+        Create the list of all beginning and end of Basics Blocks by reading the disassemblyFileName file.
+        Return these lists and 2 dictionary with the line number of all beginning and all end in the .disasm file.
+
+        :param disassemblyFileName: The name and access path of a disassembly file.
+        :param skip: The hexadecimal number that we want to ignore if a branch instruction said to create a Jump to him.
+        :type disassemblyFileName: str
+        :type skip: str
+        :return beginning, end, orderB, orderE:
+        beginning : List of all the beginning of Basics Blocks
+        end : List of all the end of Basics Blocks
+        orderB : Dictionary with all the beginning as keys and their line number in the .disasm file as values
+        orderE : Dictionary with all the end as keys and their line number in the .disasm file as values
+        '''
+
+        #Verify if the given skip has the correct format, if not skip take the value 0 and we don't skip anything
+        if (not(isinstance(skip,str)) or len(skip) < 2 or len(skip)>6):
+            skip = 0
+
+        #Open the given .disasm file and read all its contents
+        with open(disassemblyFileName, "r") as myFile:
+            txt = myFile.read()
+        #Cut the file and create a list, each line of the file is an item of the list.
+        cutFile = txt.split("\n")
+
+
+        beginning = []
+        end = []
+
+        for i in range(1, len(cutFile)):
+            #Search branchs instructions in each line of the file
+            if (".n" in cutFile[i] or "\tcbz" in cutFile[i] or "\tcbnz" in cutFile[i] or "\tbhi" in cutFile[i] or \
+                            "\tbcc" in cutFile[i] or "\tbgt" in cutFile[i] or "\tblt" in cutFile[i] or "\tbge" in cutFile[i] or \
+                            "\tbeq.w" in cutFile[i] or "\tbls" in cutFile[i] or "\tbcs" in cutFile[i] or "\tbne.w" in cutFile[i]):
+                #Cut each line to have the hexadecimal value of this line and the hexadecimal value of the jump
+                line = cutFile[i]
+                line = line.strip()
+                partLine = line.split("\t")
+                partLine = partLine[3]
+                partLine=partLine.split(" ")
+                end.append(line.split(":")[0])
+                #If the jump hexadecimal value is the same as skip we remove this line to the end list
+                if (partLine[0] == skip or partLine[1]==skip):
+                    end.remove(line.split(":")[0])
+                #Else we add the hexadecimal of the branch instruction in the beginning list
+                else:
+                    if ',' in partLine[0]:
+                        beginning.append(partLine[1])
+                    else:
+                        beginning.append(partLine[0])
+            #Search exit instructions in each line of the file, and add each of this exit instructions line in the end list
+            elif "bx\tlr" in cutFile[i] or "\tldmia" in cutFile[i] and "pc" in cutFile[i]:
+                line = cutFile[i]
+                line = line.strip()
+                end.append(line.split(":")[0])
+            #If this is the last line of the file and there is not the word "nop", we add this line to the end list
+            elif i == len(cutFile) - 1 and "nop" not in cutFile[i]:
+                line = cutFile[i]
+                line = line.strip()
+                end.append(line.split(":")[0])
+            # If this is the last line of the file and there is the word "nop", we add the line before this one to the end list
+            elif i == len(cutFile) - 1 and "nop" in cutFile[i]:
+                line = cutFile[i - 1]
+                line = line.strip()
+                end.append(line.split(":")[0])
+
+        #Create a dictionary with the end list and found the other end with the beginning list, values are lines numbers of the .disasm file
+        order = {}
+        for i in range(1, len(cutFile)):
+            for j in range(len(beginning)):
+                if beginning[j] in cutFile[i][0:10]:
+                    order[beginning[j] + '@'] = i - 1
+
+            for k in range(len(end)):
+                if end[k] in cutFile[i][0:10]:
+                    order[end[k]] = i
+        # Delete all the values in double in the dictionary
+        order = dict((t, p) for (p, t) in dict((x, y) for (y, x) in order.iteritems()).iteritems())
+
+        values = order.values()
+        beginning.append(((cutFile[1]).strip()).split(":")[0])
+
+        #Edit the beginning and the end list, so they will contain all beginnings and all ends
+        for i in range(len(order)):
+            if 'nop' not in cutFile[values[i]] and '.word' not in cutFile[values[i]]:
+                end.append(cutFile[values[i]].strip().split(":")[0])
+            if (values[i] + 1 < len(cutFile)):
+                if 'nop' not in cutFile[values[i] + 1] and '.word' not in cutFile[values[i] + 1]:
+                    beginning.append(cutFile[values[i]+1].strip().split(":")[0])
+
+        beginning = list(set(beginning))
+        #Transform the hexadecimal to int values, so we can sort ascending the list
+        for i in range(len(beginning)):
+            beginning[i] = int(beginning[i], 16)
+        beginning.sort()
+        #Retransform the item in the list in hexadecimal str
+        for i in range(len(beginning)):
+            beginning[i] = hex(beginning[i])[2:]
+
+        end = list(set(end))
+        #Transform the hexadecimal to int values, so we can sort ascending the list
+        for i in range(len(end)):
+            end[i] = int(end[i], 16)
+        end.sort()
+        # Retransform the item in the list in hexadecimal str
+        for i in range(len(end)):
+            end[i] = hex(end[i])[2:]
+
+        #If skip is in one of the list, we remove it
+        if (skip in beginning):
+            beginning.remove(skip)
+        if (skip in end):
+            end.remove(skip)
+
+        #Create a dictionary with the end list and another with the beginning list.
+        #Keys are hexadecimal values in str and values are line number in the .disasm file.
+        orderB = {}
+        orderE = {}
+
+        for i in range(1, len(cutFile)):
+            for k in range(len(end)):
+                if end[k] in cutFile[i][0:10]:
+                    orderE[end[k]] = i
+        for i in range(1, len(cutFile)):
+            for j in range(len(beginning)):
+                if beginning[j] in cutFile[i][0:10]:
+                    orderB[beginning[j]] = i
+        #Delete all the values in double in the two dictionaries
+        orderE = dict((t, p) for (p, t) in dict((x, y) for (y, x) in orderE.iteritems()).iteritems())
+        orderB = dict((t, p) for (p, t) in dict((x, y) for (y, x) in orderB.iteritems()).iteritems())
+
+        return [beginning,end,orderB,orderE]
+
+    def _createCFG(self, disassemblyFileName, skip='0'):
+        '''
+        Automatic method to create the Control Flow Graph
+
+        :param disassemblyFileName: The name and access path of a disassembly file.
+        :param skip: The hexadecimal number that we want to ignore if a branch instruction said to create a Jump to him.
+        :type disassemblyFileName: str
+        :type skip: str
+        :return cfg: CFG as list of BasicBlocks
+        '''
+
+        beginning=self.createBeginningAndEnd(disassemblyFileName, skip)[0]
+        end=self.createBeginningAndEnd(disassemblyFileName, skip)[1]
+
+        orderB=self.createBeginningAndEnd(disassemblyFileName, skip)[2]
+        orderE=self.createBeginningAndEnd(disassemblyFileName, skip)[3]
+
+        # Verify if the given skip has the correct format, if not skip take the value 0 and we don't skip anything
+        if (not (isinstance(skip, str)) or len(skip) < 2 or len(skip) > 6):
+            skip = 0
+
+        # Open the given .disasm file and read all its contents
+        with open(disassemblyFileName, "r") as myFile:
+            txt = myFile.read()
+        # Cut the file and create a list, each line of the file is an item of the list.
+        cutFile = txt.split("\n")
+
+        #Create a dictionnary which contain the beginning of all basics blocks as keys and the basic block number as values.
+        #Keys are str (the hexadecimal form) and values are int.
+        dictionnaryNumBeginning = {}
+        for i in range(len(beginning)):
+            dictionnaryNumBeginning[beginning[i]] = i
+
+        cfg = []
+
+        for n in range(len(beginning)):
+            listBlock=[]
+            # Create the list of valid value for the current basic block
+            for j in range(orderB[beginning[n]], orderE[end[n]] + 1, 1):
+                listBlock.append(int(((cutFile[j].strip()).split(":"))[0],16))
+            # Search the trueJumpAddress and the falseJumpAddress of the current basic block then create it.
+            trueJump = 0
+            falseJump = 0
+
+            # Search exit instructions in each line of the file, if one is found edit trueJump and falseJump
+            if (("bx\tlr") in cutFile[orderE[hex(max(listBlock))[2:]]] or "\tldmia" in cutFile[orderE[hex(max(listBlock))[2:]]] and \
+                        "pc" in cutFile[orderE[hex(max(listBlock))[2:]]]):
+                trueJump = falseJump = -1
+            # Search branchs instructions in each line of the file
+            elif (".n" in cutFile[orderE[hex(max(listBlock))[2:]]] or "\tcbz" in cutFile[orderE[hex(max(listBlock))[2:]]] or \
+                              '\tcbnz' in cutFile[orderE[hex(max(listBlock))[2:]]] or '\tbhi' in cutFile[orderE[hex(max(listBlock))[2:]]] or \
+                              '\tbcc' in cutFile[orderE[hex(max(listBlock))[2:]]] or "\tbgt" in cutFile[orderE[hex(max(listBlock))[2:]]] or \
+                              "\tblt" in cutFile[orderE[hex(max(listBlock))[2:]]] or "\tbge" in cutFile[orderE[hex(max(listBlock))[2:]]] or \
+                              "\tbeq.w" in cutFile[orderE[hex(max(listBlock))[2:]]] or "\tbls" in cutFile[orderE[hex(max(listBlock))[2:]]] or \
+                              "\tbcs" in cutFile[orderE[hex(max(listBlock))[2:]]] or "\tbne.w" in cutFile[orderE[hex(max(listBlock))[2:]]]):
+                trueJump = cutFile[orderE[hex(max(listBlock))[2:]]].strip().split("\t")
+                trueJump=trueJump[3]
+                trueJump=trueJump.split(" ")
+
+                if ',' in trueJump[0] or '.w' in trueJump[0]:
+                    trueJump = trueJump[1]
+                else:
+                    trueJump = trueJump[0]
+                # If this is the last basic block, falseJump doesn't exist
+                if (n == len(beginning) - 1):
+                    falseJump = - 1
+                # If the branch instruction is "b.n" falseJump and trueJump are the same
+                elif ("b.n" in cutFile[orderE[hex(max(listBlock))[2:]]]):
+                    falseJump = trueJump
+                #If this is not the last basic block, falseJump is the next basic block
+                else:
+                    falseJump = [y for y in dictionnaryNumBeginning if dictionnaryNumBeginning[y] == n + 1]
+                    falseJump = falseJump[0]
+            #If there is no branch instruction the trueJump and the falseJump are the next basic block
+            elif ((n < (len(beginning) - 1)) and trueJump == 0 and falseJump == 0):
+                falseJump = [y for y in dictionnaryNumBeginning if dictionnaryNumBeginning[y] == n + 1]
+                falseJump = falseJump[0]
+                trueJump = falseJump
+            #If one Jump is equal to skip, trueJump and falseJump take the value -1
+            if (trueJump == skip or falseJump == skip):
+                trueJump = -1
+                falseJump = -1
+            #Create the BasicBlock. All parameter have to be an int.
+            if(trueJump==-1 and falseJump==-1):
+                cfg.append(BasicBlock(int(beginning[n],16), int(end[n],16), falseJump, trueJump, listBlock))
+            elif(falseJump==-1 and trueJump!=-1):
+                cfg.append(BasicBlock(int(beginning[n], 16), int(end[n], 16), falseJump, int(trueJump,16), listBlock))
+            elif(trueJump==0 and falseJump==0):
+                cfg.append(BasicBlock(int(beginning[n], 16), int(end[n], 16), -1, -1, listBlock))
+            else:
+                cfg.append(BasicBlock(int(beginning[n], 16), int(end[n], 16), int(falseJump,16), int(trueJump,16), listBlock))
+
+        #Call the validation function
+        edgesValidate=self.validationEdges(cfg, dictionnaryNumBeginning, disassemblyFileName)
+        if(edgesValidate):
+            logging.log(25, "Edges are true, correct Control Flow Graph")
+        else:
+            logging.error("Edges are false, incorrect Control Flow Graph")
+            raise Exception("Build the wrong CFG! Aborted CFE Injection")
+
+
+        return cfg
+
+    def XMLCreation(self, disassemblyFileName, xmlFileName, skip='0'):
+        '''
+        Automatic method to create the xml file of a Control Flow Graph
+
+        :param disassemblyFileName: The name and access path of a disassembly file.
+        :param skip: The hexadecimal number that we want to ignore if a branch instruction said to create a Jump to him.
+        :param xmlFileName: The name and access path of the xml file that we will create
+        :type disassemblyFileName: str
+        :type skip: str
+        :type xmlFileName: str
+        '''
+
+        beginning = self.createBeginningAndEnd(disassemblyFileName, skip)[0]
+
+        orderB = self.createBeginningAndEnd(disassemblyFileName, skip)[2]
+        orderE = self.createBeginningAndEnd(disassemblyFileName, skip)[3]
+
+        cfg=self._createCFG(disassemblyFileName, skip)
+
+        # Open the given .disasm file and read all its contents
+        with open(disassemblyFileName, "r") as myFile:
+            txt = myFile.read()
+        # Cut the file and create a list, each line of the file is an item of the list.
+        cutFile = txt.split("\n")
+
+        # Create a dictionnary which contain the beginning of all basics blocks as keys and the basic block number as values.
+        # Keys are str (the hexadecimal form) and values are int.
+        dictionnaryNumBeginning = {}
+        for i in range(len(beginning)):
+            dictionnaryNumBeginning[beginning[i]] = i
+
+
+        #Create the XML File
+        with open(xmlFileName, 'w') as myXML:
+            myXML.write("<?xml version=\"1.0\"?>\n")
+            myXML.write("<visualization>\n")
+            for k in range(len(cfg)):
+                myXML.write("<BasicBlock id=\"" + str(k) + "\">\n")
+                for l in range(orderB[hex(cfg[k].startAddress)[2:]], orderE[hex(cfg[k].endAddress)[2:]] + 1, 1):
+                    myXML.write("<instr id=\"-111\">\n")
+                    inst = cutFile[l].split()
+                    for m in range(len(inst)):
+                        if ("<" in (inst[m]) or ">" in (inst[m])):
+                            inst[m] = ''
+                    myXML.write(' '.join(inst))
+                    myXML.write("</instr>\n")
+                if ((("bx\tlr" in cutFile[orderE[hex(cfg[k].endAddress)[2:]]]) or ("\tldmia" in cutFile[orderE[hex(cfg[k].endAddress)[2:]]] and \
+                                                                                               "pc" in cutFile[orderE[hex(cfg[k].endAddress)[2:]]]))):
+                    myXML.write("<edge>-1</edge>\n")
+                elif (".n" in cutFile[orderE[hex(cfg[k].endAddress)[2:]]] or "\tcbz" in cutFile[orderE[hex(cfg[k].endAddress)[2:]]] or \
+                                  '\tcbnz' in cutFile[orderE[hex(cfg[k].endAddress)[2:]]] or '\tbhi' in cutFile[orderE[hex(cfg[k].endAddress)[2:]]] or \
+                                  '\tbcc' in cutFile[orderE[hex(cfg[k].endAddress)[2:]]] or "\tbgt" in cutFile[orderE[hex(cfg[k].endAddress)[2:]]] or \
+                                  "\tblt" in cutFile[orderE[hex(cfg[k].endAddress)[2:]]] or "\tbge" in cutFile[orderE[hex(cfg[k].endAddress)[2:]]] or \
+                                  "\tbeq.w" in cutFile[orderE[hex(cfg[k].endAddress)[2:]]] or "\tbls" in cutFile[orderE[hex(cfg[k].endAddress)[2:]]] or \
+                                  "\tbcs" in cutFile[orderE[hex(cfg[k].endAddress)[2:]]] or "\tbne.w" in cutFile[orderE[hex(cfg[k].endAddress)[2:]]]):
+
+                    if (cfg[k].falseJumpAddress == cfg[k].trueJumpAddress and cfg[k].falseJumpAddress == -1):
+                        myXML.write("<edge>-1</edge>\n")
+                    elif (cfg[k].falseJumpAddress == cfg[k].trueJumpAddress and cfg[k].falseJumpAddress != -1):
+                        myXML.write("<edge>" + str(dictionnaryNumBeginning[hex(cfg[k].falseJumpAddress)[2:]]) + "</edge>\n")
+                    elif (cfg[k].falseJumpAddress == -1 and cfg[k].trueJumpAddress != -1):
+                        myXML.write("<edge>" + str(dictionnaryNumBeginning[hex(cfg[k].trueJumpAddress)[2:]]) + "</edge>\n")
+                    elif (cfg[k].trueJumpAddress == -1 and cfg[k].falseJumpAddress != -1):
+                        myXML.write("<edge>" + str(dictionnaryNumBeginning[hex(cfg[k].falseJumpAddress)[2:]]) + "</edge>\n")
+                    else:
+                        myXML.write("<edge>" + str(dictionnaryNumBeginning[hex(cfg[k].falseJumpAddress)[2:]]) + "</edge>\n")
+                        myXML.write("<edge>" + str(dictionnaryNumBeginning[hex(cfg[k].trueJumpAddress)[2:]]) + "</edge>\n")
+                else:
+                    myXML.write("<edge>" + str(dictionnaryNumBeginning[hex(cfg[k].falseJumpAddress)[2:]]) + "</edge>\n")
+
+                myXML.write("</BasicBlock>\n")
+            myXML.write("</visualization>\n")
+
+    #END Code of Melissa Paumard
+
+    def _determineBasicBlockID(self, pc):
+        logging.debug("Determining Basic Block for PC value 0x%X" % pc)
+        for i in range(0,len(self.cfg)):
+            bb = self.cfg[i]
+            if bb.isValidAddressForBasicBlock(pc):
+                return i
+        raise Exception("Program Counter value not in CFG")
+
+    def _createAllPossibleOneBitFlipResults(self, givenPC):
+        logging.debug("Creating all possible one bit-flip results for given PC: 0x%X" % givenPC)
+        results = []
+        digits = self._determineNumberOfDigits(givenPC)
+        rangeLimit = (digits*4)
+        for i in range(0, rangeLimit):
+            mask = 1 << i
+            results.append(givenPC ^ mask)
+        logMsg = self._createHexListString(results)
+        logging.info("Created possibilities\n\t%s" % logMsg)
+        return results
+
+    def _determineNumberOfDigits(self, givenPC):
+        digits = 0
+        for i in range(0,9):
+            if(givenPC >= math.pow(16,i)):
+                digits = digits + 1
+        logging.debug("Number of digits for PC 0x{:X} is {:d}".format(givenPC, digits))
+        return digits
+
+    def _cleanupWrongPossibilities(self, listOfPossibilities):
+        logging.debug("Cleaning up all wrong PC possibilities")
+        validPoss = []
+        for i in range(0, len(listOfPossibilities)):
+            poss = listOfPossibilities[i]
+            if(self._isInCFG(poss)):
+                for x in range(0, len(self.cfg)):
+                    bb = self.cfg[x]
+                    if bb.isValidAddressForBasicBlock(poss):
+                        validPoss.append(poss)
+                        break
+        logMsg = self._createHexListString(validPoss)
+        logging.info("Remaining possibilities\n\t%s" % logMsg)
+        return validPoss
+
+    def _keepOutFunction(self, listOfPossibilities):
+        logging.debug("Cleaning up all correct PC values")
+        validPoss = []
+        for i in range(0, len(listOfPossibilities)):
+            poss = listOfPossibilities[i]
+            if not self._isInCFG(poss):
+                validPoss.append(poss)
+            else:
+                found = False
+                for x in range(0, len(self.cfg)):
+                    bb = self.cfg[x]
+                    if bb.isValidAddressForBasicBlock(poss):
+                        found = True
+                        break
+                if not found:
+                    validPoss.append(poss)
+        logMsg = self._createHexListString(validPoss)
+        logging.info("Remaining possibilities\n\t%s" % logMsg)
+        return validPoss
+
+    def _cleanupIntraBlockPC(self, origBB, listOfPossibilities):
+        logging.debug("Cleaning up all Intra block PC possibilities")
+        validPoss = []
+        for i in range(0, len(listOfPossibilities)):
+            poss = listOfPossibilities[i]
+            bbID = self._determineBasicBlockID(poss)
+            if (bbID != origBB):
+                validPoss.append(poss)
+        logMsg = self._createHexListString(validPoss)
+        logging.info("Remaining possibilities\n\t%s" % logMsg)
+        return validPoss
+
+    def _cleanupInterBlockPC(self, origBB, listOfPossibilities):
+        logging.debug("Cleaning up all Inter block PC possibilities")
+        validPoss = []
+        for i in range(0, len(listOfPossibilities)):
+            poss = listOfPossibilities[i]
+            bbID = self._determineBasicBlockID(poss)
+            if(bbID == origBB):
+                validPoss.append(poss)
+        logMsg = self._createHexListString(validPoss)
+        logging.info("Remaining possibilities\n\t%s" % logMsg)
+        return validPoss
+
+    def _cleanupTrueFalseJumpAddresses(self, pc, listOfPoss):
+        validPoss = []
+        origBB = self._determineBasicBlockID(pc)
+        if self.cfg[origBB].isEndAddress(pc):
+            logging.debug("Cleaning up all True jump and False jump addresses")
+            for i in range(0, len(listOfPoss)):
+                poss = listOfPoss[i]
+                if (not self.cfg[origBB].isTrueJumpAddress(poss)) and (not self.cfg[origBB].isFalseJumpAddress(poss)):
+                    validPoss.append(poss)
+            logMsg = self._createHexListString(validPoss)
+            logging.info("Remaining possibilities\n\t%s" % logMsg)
+            return validPoss
+        else:
+            return listOfPoss
+
+    def _possibleNewPCList(self, pc, cleanupIntra, cleanupInter, cleanupWrong):
+        validPoss = self._createAllPossibleOneBitFlipResults(pc)
+        if cleanupWrong:
+            validPoss = self._cleanupWrongPossibilities(validPoss)
+            if (cleanupIntra):
+                validPoss = self._cleanupIntraBlockPC(self._determineBasicBlockID(pc), validPoss)
+            if (cleanupInter):
+                validPoss = self._cleanupInterBlockPC(self._determineBasicBlockID(pc),validPoss)
+            validPoss = self._cleanupTrueFalseJumpAddresses(pc, validPoss)
+        else:
+            validPoss = self._keepOutFunction(validPoss)
+        return validPoss
+
+    def _createHexListString(self, listToLog):
+        logMSG = "["
+        for i in range(0, len(listToLog)):
+            logMSG += " 0x%X" % listToLog[i]
+        logMSG += "]"
+        return logMSG
+
+    def _isInCFG(self, givenPC):
+        startAddressCFG = self.cfg[0].getStartAddress()
+        endAddressCFG = self.cfg[len(self.cfg)-1].getEndAddress()
+        if(givenPC >=startAddressCFG) and (givenPC <=endAddressCFG):
+            return True
+        else:
+            return False
+
+    def _determineJumpType(self, origPC, newPC):
+        origBB = self._determineBasicBlockID(origPC)
+        if self._isInCFG(newPC):
+            newBB = self._determineBasicBlockID(newPC)
+            if origBB == newBB:
+                self.intra = 1
+            else:
+                self.inter = 1
+        else:
+            self.outFunction = 1
+
+    def _initExcelSheet(self, nameSheet,typeInjection, numberOfCFEs):
+        #Create a new worksheet
+        ws = self.workbook.create_sheet(title=nameSheet)
+        # A1 Holds info about number of CFEs injected
+        ws['A1'] = "Results of the CFE injection, {}, with {:d} faults injected".format(typeInjection, numberOfCFEs)
+        # Create head of table
+        ws.cell(row=2, column=1).value="Orig PC"
+        ws.cell(row=2, column=2).value="Injected PC"
+        ws.cell(row=2, column=3).value="Det.Sig."
+        ws.cell(row=2, column=4).value="Hardfault"
+        ws.cell(row=2, column=5).value="Undet. WrongResult"
+        ws.cell(row=2, column=6).value="Undet. CorrectResult"
+        ws.cell(row=2, column=7).value="Intra"
+        ws.cell(row=2, column=8).value="Inter"
+        ws.cell(row=2, column=9).value="outFunction"
+        return ws
+
+    def _writeToExcel(self, worksheet, namesheet, row, origPC, injPC, detected, hardFault, undWR, undCR):
+        # Fill content into worksheet
+        worksheet.cell(row=row, column=1).value=("0x%X" % origPC)
+        worksheet.cell(row=row, column=2).value=("0x%X" % injPC)
+        worksheet.cell(row=row, column=3).value=detected
+        worksheet.cell(row=row, column=4).value=hardFault
+        worksheet.cell(row=row, column=5).value=undWR
+        worksheet.cell(row=row, column=6).value=undCR
+        worksheet.cell(row=row, column=7).value=self.intra
+        worksheet.cell(row=row, column=8).value=self.inter
+        worksheet.cell(row=row, column=9).value=self.outFunction
+        # Save workbook
+        self.workbook.save("detCFEInjection.xlsx")
+        logging.info("Written results to Excel")
+        return self.workbook.get_sheet_by_name(namesheet)

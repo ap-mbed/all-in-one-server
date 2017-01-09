@@ -1,0 +1,155 @@
+<?xml version="1.0"?>
+<visualization>
+<BasicBlock id="0">
+<instr id="-111">
+1c8: e92d 47f0 stmdb sp!, {r4, r5, r6, r7, r8, r9, r10, lr}</instr>
+<instr id="-111">
+1cc: 2b00 cmp r3, #0</instr>
+<instr id="-111">
+1ce: b088 sub sp, #32</instr>
+<instr id="-111">
+1d0: 9005 str r0, [sp, #20]</instr>
+<instr id="-111">
+1d2: 9106 str r1, [sp, #24]</instr>
+<instr id="-111">
+1d4: 9207 str r2, [sp, #28]</instr>
+<instr id="-111">
+1d6: f8dd 8040 ldr.w r8, [sp, #64] ; 0x40</instr>
+<instr id="-111">
+1da: f8dd 9044 ldr.w r9, [sp, #68] ; 0x44</instr>
+<instr id="-111">
+1de: 9303 str r3, [sp, #12]</instr>
+<instr id="-111">
+1e0: dd38 ble.n 254  (*) [10], int (*) [10], int (*) [10], int, int, </instr>
+<edge>1</edge>
+<edge>9</edge>
+</BasicBlock>
+<BasicBlock id="1">
+<instr id="-111">
+1e2: f109 4380 add.w r3, r9, #1073741824 ; 0x40000000</instr>
+<instr id="-111">
+1e6: 3b01 subs r3, #1</instr>
+<instr id="-111">
+1e8: 2200 movs r2, #0</instr>
+<instr id="-111">
+1ea: 009b lsls r3, r3, #2</instr>
+<instr id="-111">
+1ec: 9201 str r2, [sp, #4]</instr>
+<instr id="-111">
+1ee: 9304 str r3, [sp, #16]</instr>
+<instr id="-111">
+1f0: 9202 str r2, [sp, #8]</instr>
+<edge>2</edge>
+</BasicBlock>
+<BasicBlock id="2">
+<instr id="-111">
+1f2: f1b8 0f00 cmp.w r8, #0</instr>
+<instr id="-111">
+1f6: dd24 ble.n 242  (*) [10], int (*) [10], int (*) [10], int, int, </instr>
+<edge>3</edge>
+<edge>8</edge>
+</BasicBlock>
+<BasicBlock id="3">
+<instr id="-111">
+1f8: 9b01 ldr r3, [sp, #4]</instr>
+<instr id="-111">
+1fa: 9a04 ldr r2, [sp, #16]</instr>
+<instr id="-111">
+1fc: 9905 ldr r1, [sp, #20]</instr>
+<instr id="-111">
+1fe: 18d7 adds r7, r2, r3</instr>
+<instr id="-111">
+200: f1a3 0a04 sub.w r10, r3, #4</instr>
+<instr id="-111">
+204: 440f add r7, r1</instr>
+<instr id="-111">
+206: 448a add r10, r1</instr>
+<instr id="-111">
+208: 9907 ldr r1, [sp, #28]</instr>
+<instr id="-111">
+20a: 9e06 ldr r6, [sp, #24]</instr>
+<instr id="-111">
+20c: 18cd adds r5, r1, r3</instr>
+<instr id="-111">
+20e: f04f 0e00 mov.w lr, #0</instr>
+<edge>4</edge>
+</BasicBlock>
+<BasicBlock id="4">
+<instr id="-111">
+212: f1b9 0f00 cmp.w r9, #0</instr>
+<instr id="-111">
+216: dd0c ble.n 232  (*) [10], int (*) [10], int (*) [10], int, int, </instr>
+<edge>5</edge>
+<edge>7</edge>
+</BasicBlock>
+<BasicBlock id="5">
+<instr id="-111">
+218: 4652 mov r2, r10</instr>
+<instr id="-111">
+21a: 6829 ldr r1, [r5, #0]</instr>
+<instr id="-111">
+21c: 2300 movs r3, #0</instr>
+<edge>6</edge>
+</BasicBlock>
+<BasicBlock id="6">
+<instr id="-111">
+21e: f852 0f04 ldr.w r0, [r2, #4]!</instr>
+<instr id="-111">
+222: 58f4 ldr r4, [r6, r3]</instr>
+<instr id="-111">
+224: 42ba cmp r2, r7</instr>
+<instr id="-111">
+226: fb04 1100 mla r1, r4, r0, r1</instr>
+<instr id="-111">
+22a: f103 0328 add.w r3, r3, #40 ; 0x28</instr>
+<instr id="-111">
+22e: 6029 str r1, [r5, #0]</instr>
+<instr id="-111">
+230: d1f5 bne.n 21e  (*) [10], int (*) [10], int (*) [10], int, int, </instr>
+<edge>7</edge>
+<edge>6</edge>
+</BasicBlock>
+<BasicBlock id="7">
+<instr id="-111">
+232: f10e 0e01 add.w lr, lr, #1</instr>
+<instr id="-111">
+236: 45c6 cmp lr, r8</instr>
+<instr id="-111">
+238: f106 0604 add.w r6, r6, #4</instr>
+<instr id="-111">
+23c: f105 0504 add.w r5, r5, #4</instr>
+<instr id="-111">
+240: d1e7 bne.n 212  (*) [10], int (*) [10], int (*) [10], int, int, </instr>
+<edge>8</edge>
+<edge>4</edge>
+</BasicBlock>
+<BasicBlock id="8">
+<instr id="-111">
+242: 9a01 ldr r2, [sp, #4]</instr>
+<instr id="-111">
+244: 9b02 ldr r3, [sp, #8]</instr>
+<instr id="-111">
+246: 3228 adds r2, #40 ; 0x28</instr>
+<instr id="-111">
+248: 9201 str r2, [sp, #4]</instr>
+<instr id="-111">
+24a: 9a03 ldr r2, [sp, #12]</instr>
+<instr id="-111">
+24c: 3301 adds r3, #1</instr>
+<instr id="-111">
+24e: 4293 cmp r3, r2</instr>
+<instr id="-111">
+250: 9302 str r3, [sp, #8]</instr>
+<instr id="-111">
+252: d1ce bne.n 1f2  (*) [10], int (*) [10], int (*) [10], int, int, </instr>
+<edge>9</edge>
+<edge>2</edge>
+</BasicBlock>
+<BasicBlock id="9">
+<instr id="-111">
+254: b008 add sp, #32</instr>
+<instr id="-111">
+256: e8bd 87f0 ldmia.w sp!, {r4, r5, r6, r7, r8, r9, r10, pc}</instr>
+<edge>-1</edge>
+</BasicBlock>
+</visualization>

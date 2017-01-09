@@ -1,0 +1,77 @@
+<?xml version="1.0"?>
+<visualization>
+<BasicBlock id="0">
+<instr id="-111">
+1c8: 2900 cmp r1, #0</instr>
+<instr id="-111">
+1ca: dd15 ble.n 1f8  </instr>
+<edge>1</edge>
+<edge>7</edge>
+</BasicBlock>
+<BasicBlock id="1">
+<instr id="-111">
+1cc: b470 push {r4, r5, r6}</instr>
+<instr id="-111">
+1ce: 1e4d subs r5, r1, #1</instr>
+<instr id="-111">
+1d0: 4405 add r5, r0</instr>
+<instr id="-111">
+1d2: 2600 movs r6, #0</instr>
+<edge>2</edge>
+</BasicBlock>
+<BasicBlock id="2">
+<instr id="-111">
+1d4: 2901 cmp r1, #1</instr>
+<instr id="-111">
+1d6: d00a beq.n 1ee  </instr>
+<edge>3</edge>
+<edge>5</edge>
+</BasicBlock>
+<BasicBlock id="3">
+<instr id="-111">
+1d8: 4603 mov r3, r0</instr>
+<edge>4</edge>
+</BasicBlock>
+<BasicBlock id="4">
+<instr id="-111">
+1da: 781a ldrb r2, [r3, #0]</instr>
+<instr id="-111">
+1dc: f813 4f01 ldrb.w r4, [r3, #1]!</instr>
+<instr id="-111">
+1e0: 42a2 cmp r2, r4</instr>
+<instr id="-111">
+1e2: bf84 itt hi</instr>
+<instr id="-111">
+1e4: f803 4c01 strbhi.w r4, [r3, #-1]</instr>
+<instr id="-111">
+1e8: 701a strbhi r2, [r3, #0]</instr>
+<instr id="-111">
+1ea: 42ab cmp r3, r5</instr>
+<instr id="-111">
+1ec: d1f5 bne.n 1da  </instr>
+<edge>5</edge>
+<edge>4</edge>
+</BasicBlock>
+<BasicBlock id="5">
+<instr id="-111">
+1ee: 3601 adds r6, #1</instr>
+<instr id="-111">
+1f0: 428e cmp r6, r1</instr>
+<instr id="-111">
+1f2: d1ef bne.n 1d4  </instr>
+<edge>6</edge>
+<edge>2</edge>
+</BasicBlock>
+<BasicBlock id="6">
+<instr id="-111">
+1f4: bc70 pop {r4, r5, r6}</instr>
+<instr id="-111">
+1f6: 4770 bx lr</instr>
+<edge>-1</edge>
+</BasicBlock>
+<BasicBlock id="7">
+<instr id="-111">
+1f8: 4770 bx lr</instr>
+<edge>-1</edge>
+</BasicBlock>
+</visualization>

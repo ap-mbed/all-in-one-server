@@ -1,0 +1,120 @@
+__author__ = 'Jens Vankeirsbilck'
+
+import logging
+import random
+from pyOCD.board import MbedBoard
+
+class EthernetFaultInjector:
+    def __init__(self, board=None):
+        if board is not None:
+            self.board = board
+            self.target = board.target
+        else:
+            try:
+                self.board = self._initialize()
+                self.target = self.board.target
+            except Exception as e:
+                logging.error("Initialization of EtheretFaultInjector failed!\n%s" %e)
+
+    # Public methods
+    def injectMWTD(self):
+        try:
+            self.target.halt()
+            mwtd = self.target.readMemory(0x5000002C) # 0x5000 002C is the address of MWTD register
+            mwtd &= (0x0000FFFF)
+            logging.debug("Current value of MWTD: %d" % mwtd)
+            bitToFlip =  random.randint(0,15)
+            logging.info("Will flip bit %d of MWTD" % bitToFlip)
+            mwtd ^= (1 << bitToFlip)
+            logging.debug("New value of MWTD: %d" % mwtd)
+            self.target.writeMemory(0x5000002C, mwtd)
+            logging.log(25, "Succesfully flipped a bit of MWTD")
+        except Exception as e:
+            logging.error("Unable to flip a bit of MWTD!\n%s" % e)
+        finally:
+            self.target.resume()
+
+    def injectInPacketTx(self):
+        try:
+            self.target.halt()
+            TxD = self.target.readMemory(0x5000011C)    # 0x5000 011C is the address of TxDescriptor
+            TxDNr = self.target.readMemory(0x50000124)  # 0x5000 0124 is the address of TxDescriptorNumber
+            TxDNr &= 0x0000FFFF
+            packetAddress = TxD + 8*TxDNr
+            logging.debug("packetAddress: 0x%X" % packetAddress)
+            size = self.target.readMemory(packetAddress+4)
+            size &= 0x000007FF
+            logging.debug("size of packet: %d" % size)
+            startAddress = self.target.readMemory(packetAddress)
+            logging.debug("startAddress: 0x%X" % startAddress)
+            addresses = []
+            for i in range(0, size):
+                addresses.append(startAddress + i)
+                logging.debug("\tcreated address: 0x%X" % addresses[i])
+            index = random.randint(0, size)
+            bitToFlip = 1 << random.randint(0,31)
+            logging.info("Bit position that will be flipped: %d" % bitToFlip)
+            value = self.target.readMemory(addresses[index])
+            logging.debug("Will affect packet fragment located at: 0x%X" % addresses[index])
+            logging.debug("Current value of fragment: 0x%X" % value)
+            value ^= bitToFlip
+            self.target.writeMemory(addresses[index],value)
+            logging.debug("New value written: 0x%X" % value)
+            logging.log(25, "Successfully flipped a bit in a packet")
+        except Exception as e:
+            logging.error("Unable to flip a bit in the packet!\n%s" % e)
+        finally:
+            self.target.resume()
+
+    def injectInPacketRx(self):
+        try:
+            self.target.halt()
+            RxD = self.target.readMemory(0x50000108)    # 0x5000 0108 is the address of TxDescriptor
+            RxDNr = self.target.readMemory(0x50000110)  # 0x5000 0110 is the address of TxDescriptorNumber
+            RxDNr &= 0x0000FFFF
+            packetAddress = RxD + 8*RxDNr
+            logging.debug("packetAddress: 0x%X" % packetAddress)
+            size = self.target.readMemory(packetAddress+4)
+            size &= 0x000007FF
+            logging.debug("size of packet: %d" % size)
+            startAddress = self.target.readMemory(packetAddress)
+            logging.debug("startAddress: 0x%X" % startAddress)
+            addresses = []
+            for i in range(0, size):
+                addresses.append(startAddress + i)
+                logging.debug("\tcreated address: 0x%X" % addresses[i])
+            index = random.randint(0, size)
+            bitToFlip = 1 << random.randint(0,31)
+            logging.info("Bit position that will be flipped: %d" % bitToFlip)
+            value = self.target.readMemory(addresses[index])
+            logging.debug("Will affect packet fragment located at: 0x%X" % addresses[index])
+            logging.debug("Current value of fragment: 0x%X" % value)
+            value ^= bitToFlip
+            self.target.writeMemory(addresses[index],value)
+            logging.debug("New value written: 0x%X" % value)
+            logging.log(25, "Successfully flipped a bit in a packet")
+        except Exception as e:
+            logging.error("Unable to flip a bit in the packet!\n%s" % e)
+        finally:
+            self.target.resume()
+
+
+    # Private methods
+    def _initialize(self):
+        """
+            Initialize mbed
+        :return: board encapsulating the mbed
+        """
+        board = None
+        try:
+            # Search and initialize mbed
+            board = MbedBoard.chooseBoard()
+
+            # Confirm LPC1768
+            if board.getTargetType() == "lpc1768":
+                logging.debug("Target type mbed lpc1768 found")
+            else:
+                raise Exception("Only NXP LPC1768 supported")
+        finally:
+            if board is not None:
+                return board

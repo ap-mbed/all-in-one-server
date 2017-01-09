@@ -1,0 +1,7 @@
+/PyOCD/test_gcc_arm/*.o
+/PyOCD/test_gcc_arm/*.elf
+/PyOCD/test_gcc_arm/*.bin
+*.pyc
+*.xlsx
+!/PyOCD/CFE_Injector/randomCFEInjection.xlsx
+*.disasm
