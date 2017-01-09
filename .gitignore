@@ -3,5 +3,6 @@
 /PyOCD/test_gcc_arm/*.bin
 *.pyc
 *.xlsx
-!/PyOCD/CFE_Injector/randomCFEInjection.xlsx
+!/PyOCD/CFE_Injector/*.xlsx
+!/PyOCD/DFE_Injector/*.xlsx
 *.disasm
