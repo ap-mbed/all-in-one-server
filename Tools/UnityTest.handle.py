@@ -5,7 +5,7 @@ from MbedTools import MbedTools
 
 class UnityTestHandle(MbedTools):
 
-    receiver = "honzikpoul@gmail.com"
+    receiver = "martin.adamec@student.kuleuven.be" 
 
     ## Method for restart mbed on serial port
     def restartMbed(self):
