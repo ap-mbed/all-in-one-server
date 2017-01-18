@@ -4,6 +4,8 @@ import time, sys, inspect, os
 path = os.path.dirname(inspect.getfile(inspect.currentframe()))
 sys.path.extend([os.path.join(path, '..', '..', 'CFE_Injector')])
 
+
+
 # Import tools
 sys.path.insert(1, os.path.join(path, '..', '..', '..', 'Tools'))
 
